@@ -4,17 +4,17 @@ from torch.nn import functional as F
 
 batch_size = 64  # how many independent sequences will we process in parallel?
 block_size = 256  # what is the maximum context length for predictions?
-max_iters = 5000
+max_iters = 2000
 eval_interval = 300
 learning_rate = (
-    3e-4  # self attention can't handle low learning rates # bigger network => reduce lr
+    4e-4  # self attention can't handle low learning rates # bigger network => reduce lr
 )
 device = "cuda" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
-n_embd = 64
-n_layer = 2  # number of layers
+n_embd = 128
+n_layer = 6  # number of layers
 dropout = 0.2
-n_head = 4  # number of attention heads
+n_head = 12  # number of attention heads
 
 vocab = [
     "R1_Q1",
@@ -92,7 +92,7 @@ itos = {i: ch for i, ch in enumerate(vocab)}
 
 def encode(text):
     """simple encoder"""
-    return [stoi[x] for x in text.strip().split("\n")]
+    return [stoi[x] for x in text]
 
 
 def decode(code):
@@ -101,7 +101,7 @@ def decode(code):
 
 
 # print(encode(text)[:100])
-data = torch.tensor(encode(text), dtype=torch.long)
+data = torch.tensor(encode(text.strip().split("\n")), dtype=torch.long)
 n = int(0.9 * len(data))  # first 90% will be train, rest val
 train_data = data[:n]
 val_data = data[n:]
@@ -109,6 +109,8 @@ val_data = data[n:]
 
 # data loading
 def get_batch(split):
+    """returns inputs and outputs of batch size"""
+
     data = train_data if split == "train" else val_data
     ix = torch.randint(
         len(data) - block_size, (batch_size,)
@@ -121,50 +123,64 @@ def get_batch(split):
     return x, y
 
 
-@torch.no_grad()  # telling pytorch to not call .backward as it doesn't have to store intermediate vars
+# loss estimation
+@torch.no_grad
 def estimate_loss():
+    """switches model to eval mode and estimates losses"""
     out = {}
-    model.eval()  # switching modes, simple model here but be aware of when switching modes
+    model.eval()  # switch to eval mode
     for split in ["train", "val"]:
-        losses = torch.zeros(eval_iters)
-        X, Y = get_batch(split)
+        losses = torch.zeros(eval_iters)  # how many to check
         for k in range(eval_iters):
-            logits, loss = model(X, Y)
-            losses[k] = loss.item()
+            X, Y = get_batch(split)  # grab new random starting point
+            logits, loss = model(X, Y)  # run through model
+            losses[k] = loss.item()  # grab the loss value
         out[split] = losses.mean()
-    model.train()
+    model.train()  # switch back to train mode
     return out
 
 
+# creating an attention head
 class Head(nn.Module):
     def __init__(self, head_size):
+        """single attention head"""
         super().__init__()
-        self.key = nn.Linear(n_embd, head_size, bias=False)
-        self.query = nn.Linear(n_embd, head_size, bias=False)
-        self.value = nn.Linear(n_embd, head_size, bias=False)
+
+        self.key = nn.Linear(
+            n_embd, head_size, bias=False
+        )  # typical not to use bias here, why? # key matrix
+        self.query = nn.Linear(n_embd, head_size, bias=False)  # query matrix
+        self.value = nn.Linear(n_embd, head_size, bias=False)  # values matrix
+
         self.register_buffer(
             "tril", torch.tril(torch.ones(block_size, block_size))
-        )  # not a parameter
+        )  # don't want as parameter to model # tril of (block_size, block_size)
 
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
+        """forward pass in our attention head"""
         B, T, C = x.shape
-        k = self.key(x)  # (B,T,head_size)
-        q = self.query(x)  # (B,T,head_size)
-        v = self.value(x)  # (B,T,head_size)
+        k = self.key(x)  # get the keys by applying linear layer to x # (B,T,head_size)
+        q = self.query(x)  # queries, ^
+        v = self.value(x)  # values, ^
 
-        wei = (
-            q @ k.transpose(-2, -1) * (C**-0.5)
-        )  # (B,T,T) normalized by the sqrt(head_size) so that peaks are subdued
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
-        wei = F.softmax(wei, dim=-1)
-        wei = self.dropout(wei)  # (B,T,T)
+        weights = (
+            q @ k.transpose(-2, -1) * (C**-5)
+        )  # matrix mult w/ transpose to make sizing work --> (B, T, T) normalized by sqrt(head_size) to subdue peaks
 
-        out = wei @ v  # (B,T,head_size)
+        weights = weights.masked_fill(
+            self.tril[:T, :T] == 0, float("-inf")
+        )  # applying that matrix before softmax
+        weights = F.softmax(weights, dim=-1)  # softmax across last dimension
+        weights = self.dropout(weights)
+
+        out = weights @ v
+
         return out
 
 
+## **
 class MultiHeadAttention(nn.Module):
     """multiple heads of self-attention in parallel"""
 
@@ -282,33 +298,37 @@ class TransformerModel(nn.Module):
         return idx
 
 
-model = TransformerModel()
-m = model.to(device)
+if __name__ == "__main__":
+    model = TransformerModel()
+    m = model.to(device)
 
-# create a PyTorch optimizer
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    # create a PyTorch optimizer
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
-for iter in range(max_iters):
+    for iter in range(max_iters):
 
-    # every once in a while evaluate the loss on train and val sets
-    if iter % eval_interval == 0:
-        losses = estimate_loss()
-        print(
-            f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
-        )
+        # every once in a while evaluate the loss on train and val sets
+        if iter % eval_interval == 0:
+            losses = estimate_loss()
+            print(
+                f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+            )
 
-    # sample a batch of data
-    xb, yb = get_batch("train")
+        # sample a batch of data
+        xb, yb = get_batch("train")
 
-    # evaluate the loss
-    logits, loss = model(xb, yb)
-    optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    optimizer.step()
+        # evaluate the loss
+        logits, loss = model(xb, yb)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
 
-# generate from the model
-context = torch.zeros((1, 1), dtype=torch.long, device=device)
-print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
+    # generate from the model
+    context = torch.zeros((1, 1), dtype=torch.long, device=device)
+    print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
 
-with open("out.txt", "w", encoding="utf-8") as f:
-    f.write(decode(m.generate(context, max_new_tokens=5000)[0].tolist()))
+    with open("out.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(decode(m.generate(context, max_new_tokens=5000)[0].tolist())))
+
+    # Save the trained model
+    torch.save(model.state_dict(), "fin_transformer_model.pth")
