@@ -55,7 +55,7 @@ class SimpleTransformer(nn.Module):
         dropout=0.5,
     ):
         super().__init__()
-
+        self.h = hidden_dim
         ### LATENT REPRESENTATION OF TOKENS/POSITIONS ###
         self.c_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
         self.e_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
@@ -93,6 +93,7 @@ class SimpleTransformer(nn.Module):
         ), f"{x_data.shape}"  # set up to iterate over batch outside of here
 
         B, T, N, F = x_data.shape
+        H = self.h
 
         # x = x_data.squeeze(-1)  # (B, T, N, F)
         x = x_data.permute(0, 2, 1, 3).contiguous()  # (B, N, T, F)
@@ -100,20 +101,22 @@ class SimpleTransformer(nn.Module):
 
         symbol = torch.arange(0, N, device=x.device)  # (N)
         symbol_encoding = self.symbol_embed_table(symbol)  # (N, H)
-        symbol_encoding = symbol_encoding.unsqueeze(1)  # (N, 1, H)
+        symbol_encoding = symbol_encoding.unsqueeze(1).unsqueeze(0)  # (N, 1, H)
 
         # print(x_flat[:, :, 0].shape) # (N, T)
-        c_embed = self.c_embed_table(x_flat[:, :, 0])  # (B*N, T, H)
-        e_embed = self.c_embed_table(x_flat[:, :, 1])  # (B*N, T, H)
-        rv_embed = self.c_embed_table(x_flat[:, :, 2])  # (B*N, T, H)
+        c_embed = self.c_embed_table(x_flat[:, :, 0]).view(B, N, T, H)  # (B, N, T, H)
+        e_embed = self.c_embed_table(x_flat[:, :, 1]).view(B, N, T, H)  # (B, N, T, H)
+        rv_embed = self.c_embed_table(x_flat[:, :, 2]).view(B, N, T, H)  # (B, N, T, H)
         position = torch.arange(0, self.seq_len, device=x_data.device)  # (T)
-        position_encoding = self.position_embed_table(position).unsqueeze(
-            0
-        )  # (1, T, H)
+        position_encoding = (
+            self.position_embed_table(position).unsqueeze(0).unsqueeze(0)
+        )  # (1, 1, T, H)
 
-        # sum token + position + symbol embeddings -> (B*N, T, H)
-        # print(position_encoding.shape, symbol_encoding.shape, c_embed.shape)
+        # sum token + position + symbol embeddings -> (B, N, T, H)
+        # print(position_encoding.shape, symbol_encoding.shape, c_embed.shape) # torch.Size([1, 1, T, H]) torch.Size([N, 1, H]) torch.Size([B, N, T, H])
         data = position_encoding + symbol_encoding + c_embed + e_embed + rv_embed
+
+        data = data.view(B * N, T, H)
 
         data = self.blocks(data)
         # logits -> reshape back to (B, T, N, C)
