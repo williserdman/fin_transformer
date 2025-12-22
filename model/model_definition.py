@@ -36,7 +36,7 @@ class Block(nn.Module):
                 1,
             ),
         )  # (B,T,n_embd)
-        x += n
+        x = x + n
         x = x + self.ffwd(self.ln2(x))  # (B,T,n_embd)
         return x
 
@@ -47,6 +47,7 @@ class SimpleTransformer(nn.Module):
         vocab: list[str],
         sequence_len,
         output_classes,
+        symbol_count,
         output_class_freq=None,
         hidden_dim=32,
         heads=4,
@@ -58,6 +59,9 @@ class SimpleTransformer(nn.Module):
         ### LATENT REPRESENTATION OF TOKENS/POSITIONS ###
         self.token_embed_table = nn.Embedding(len(vocab), hidden_dim)
         self.position_embed_table = nn.Embedding(sequence_len, hidden_dim)
+        self.symbol_embed_table = nn.Embedding(
+            symbol_count, hidden_dim
+        )  # N = symbol_count
         self.seq_len = sequence_len
 
         ### ATTENTION BLOCKS ###
@@ -89,13 +93,28 @@ class SimpleTransformer(nn.Module):
         assert F == 1
 
         x = x_data.squeeze(-1)  # (B, T, N)
+        symbol = torch.arange(0, N, device=x.device)  # (N)
+        symbol_encoding = self.symbol_embed_table(symbol)  # (N, H)
+
         x = x.permute(0, 2, 1).contiguous()  # (B, N, T)
         x_flat = x.view(B * N, T)  # (B*N, T)
 
-        tok_embed = self.token_embed_table(x_flat)
-        position = torch.arange(0, self.seq_len, device=x_data.device)
-        position_encoding = self.position_embed_table(position)
-        data = tok_embed + position_encoding  # broadcast to (B*N, T, H)
+        tok_embed = self.token_embed_table(x_flat)  # (B*N, T, H)
+        position = torch.arange(0, self.seq_len, device=x_data.device)  # (T)
+        position_encoding = self.position_embed_table(position).unsqueeze(
+            0
+        )  # (1, T, H)
+
+        # expand symbol_encoding to (B, N, H) then reshape to (B*N, 1, H) so it broadcasts over time
+        symbol_encoding = (
+            symbol_encoding.unsqueeze(0)
+            .expand(B, N, -1)
+            .contiguous()
+            .view(B * N, 1, -1)
+        )
+
+        # sum token + position + symbol embeddings -> (B*N, T, H)
+        data = tok_embed + position_encoding + symbol_encoding
 
         data = self.blocks(data)
         # logits -> reshape back to (B, T, N, C)
@@ -103,10 +122,9 @@ class SimpleTransformer(nn.Module):
         logits = (
             logits.view(B, N, T, self.c).permute(0, 2, 1, 3).contiguous()
         )  # (B, T, N, C)
-        logits = self.lm(data)  # (T, N, output_classes)
 
         temperature = 0.5
-        logits /= temperature
+        logits = logits / temperature
 
         ### LOSS CALCULATIONS
         loss = None
