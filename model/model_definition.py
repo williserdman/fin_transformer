@@ -30,7 +30,10 @@ class Block(nn.Module):
             need_weights=False,
             is_causal=True,
             attn_mask=torch.triu(
-                torch.ones((self.seq_len, self.seq_len), device=x.device), 1
+                torch.ones(
+                    (self.seq_len, self.seq_len), device=x.device, dtype=torch.bool
+                ),
+                1,
             ),
         )  # (B,T,n_embd)
         x += n
@@ -72,6 +75,7 @@ class SimpleTransformer(nn.Module):
 
         if output_class_freq is not None:
             w = torch.reciprocal(torch.tensor(output_class_freq))
+            self.register_buffer("class_weight", w)
             self.loss_func = nn.CrossEntropyLoss(weight=w)  # TODO: cast to device?
         else:
             self.loss_func = nn.CrossEntropyLoss()
@@ -109,12 +113,12 @@ class SimpleTransformer(nn.Module):
 
             ### LOSS CALCULATIONS
             loss = None
-            if y_data is not None:
+            if y_seq is not None:
                 # print(out.shape, y_seq.shape)
                 out_flat = logits.view(T * N, self.c)
                 y_flat = y_seq.view(T * N).long()
                 # print(out_flat.shape, y_flat.shape)
-                loss = self.loss_func(out_flat, y_flat) / (T * N)
+                loss = self.loss_func(out_flat, y_flat)
 
             return self.smax(logits), loss  # (T, N, 2), loss
 
