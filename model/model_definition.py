@@ -114,7 +114,7 @@ class SimpleTransformer(nn.Module):
                 out_flat = logits.view(T * N, self.c)
                 y_flat = y_seq.view(T * N).long()
                 # print(out_flat.shape, y_flat.shape)
-                loss = self.loss_func(out_flat, y_flat)
+                loss = self.loss_func(out_flat, y_flat) / (T * N)
 
             return self.smax(logits), loss  # (T, N, 2), loss
 
@@ -135,4 +135,4 @@ class SimpleTransformer(nn.Module):
         if y_data is None:
             total_loss = None
 
-        return torch.stack(results, dim=0), total_loss
+        return torch.stack(results, dim=0), total_loss / B
