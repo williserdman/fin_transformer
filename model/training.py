@@ -173,6 +173,14 @@ def train_loop(
                 )
             break
 
+        """ # DEBUG: Check if the heart is beating
+        print("Gradient Norms:")
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                print(f"{name}: {param.grad.norm().item()}")
+            else:
+                print(f"{name}: NO GRADIENT (DEAD)") """
+
     best_checkpoint = torch.load(checkpoint_dir / "best_model.pt", weights_only=False)
     model.load_state_dict(best_checkpoint["model_state_dict"])
 
