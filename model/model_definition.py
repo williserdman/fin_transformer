@@ -30,7 +30,7 @@ class Block(nn.Module):
             need_weights=False,
             is_causal=True,
             attn_mask=torch.triu(
-                torch.ones((self.seq_len, self.seq_len), device=x.device), True
+                torch.ones((self.seq_len, self.seq_len), device=x.device), 1
             ),
         )  # (B,T,n_embd)
         x += n
