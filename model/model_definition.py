@@ -44,7 +44,7 @@ class Block(nn.Module):
 class SimpleTransformer(nn.Module):
     def __init__(
         self,
-        vocab: list[str],
+        embed_table_sizes,
         sequence_len,
         output_classes,
         symbol_count,
@@ -57,7 +57,10 @@ class SimpleTransformer(nn.Module):
         super().__init__()
 
         ### LATENT REPRESENTATION OF TOKENS/POSITIONS ###
-        self.token_embed_table = nn.Embedding(len(vocab), hidden_dim)
+        self.c_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
+        self.e_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
+        self.rv_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
+
         self.position_embed_table = nn.Embedding(sequence_len, hidden_dim)
         self.symbol_embed_table = nn.Embedding(
             symbol_count, hidden_dim
@@ -90,31 +93,27 @@ class SimpleTransformer(nn.Module):
         ), f"{x_data.shape}"  # set up to iterate over batch outside of here
 
         B, T, N, F = x_data.shape
-        assert F == 1
 
-        x = x_data.squeeze(-1)  # (B, T, N)
+        # x = x_data.squeeze(-1)  # (B, T, N, F)
+        x = x_data.permute(0, 2, 1, 3).contiguous()  # (B, N, T, F)
+        x_flat = x.view(B * N, T, F)  # (B*N, T, F)
+
         symbol = torch.arange(0, N, device=x.device)  # (N)
         symbol_encoding = self.symbol_embed_table(symbol)  # (N, H)
+        symbol_encoding = symbol_encoding.unsqueeze(1)  # (N, 1, H)
 
-        x = x.permute(0, 2, 1).contiguous()  # (B, N, T)
-        x_flat = x.view(B * N, T)  # (B*N, T)
-
-        tok_embed = self.token_embed_table(x_flat)  # (B*N, T, H)
+        # print(x_flat[:, :, 0].shape) # (N, T)
+        c_embed = self.c_embed_table(x_flat[:, :, 0])  # (B*N, T, H)
+        e_embed = self.c_embed_table(x_flat[:, :, 1])  # (B*N, T, H)
+        rv_embed = self.c_embed_table(x_flat[:, :, 2])  # (B*N, T, H)
         position = torch.arange(0, self.seq_len, device=x_data.device)  # (T)
         position_encoding = self.position_embed_table(position).unsqueeze(
             0
         )  # (1, T, H)
 
-        # expand symbol_encoding to (B, N, H) then reshape to (B*N, 1, H) so it broadcasts over time
-        symbol_encoding = (
-            symbol_encoding.unsqueeze(0)
-            .expand(B, N, -1)
-            .contiguous()
-            .view(B * N, 1, -1)
-        )
-
         # sum token + position + symbol embeddings -> (B*N, T, H)
-        data = tok_embed + position_encoding + symbol_encoding
+        # print(position_encoding.shape, symbol_encoding.shape, c_embed.shape)
+        data = position_encoding + symbol_encoding + c_embed + e_embed + rv_embed
 
         data = self.blocks(data)
         # logits -> reshape back to (B, T, N, C)
