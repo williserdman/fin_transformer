@@ -111,12 +111,12 @@ class SimpleTransformer(nn.Module):
             loss = None
             if y_data is not None:
                 # print(out.shape, y_seq.shape)
-                out_flat = out.view(T * N, self.c)
+                out_flat = logits.view(T * N, self.c)
                 y_flat = y_seq.view(T * N).long()
                 # print(out_flat.shape, y_flat.shape)
                 loss = self.loss_func(out_flat, y_flat)
 
-            return self.smax(out), loss  # (T, N, 2), loss
+            return self.smax(logits), loss  # (T, N, 2), loss
 
         results = []
         total_loss = 0
