@@ -86,57 +86,35 @@ class SimpleTransformer(nn.Module):
         ), f"{x_data.shape}"  # set up to iterate over batch outside of here
 
         B, T, N, F = x_data.shape
+        assert F == 1
 
-        def _process_sequence(x_seq, y_seq):
-            # F just one here as tokens need to be cast to their learned latents
+        x = x_data.squeeze(-1)  # (B, T, N)
+        x = x.permute(0, 2, 1).contiguous()  # (B, N, T)
+        x_flat = x.view(B * N, T)  # (B*N, T)
 
-            # print("x_seq:", x_seq.shape) # (T, N, 1)
-            x_seq = x_seq.squeeze(-1)  # (T, N)
-            data = self.token_embed_table(x_seq)  # (T, N, H)
-            # print(data.shape)
+        tok_embed = self.token_embed_table(x_flat)
+        position = torch.arange(0, self.seq_len, device=x_data.device)
+        position_encoding = self.position_embed_table(position)
+        data = tok_embed + position_encoding  # broadcast to (B*N, T, H)
 
-            position = torch.arange(0, self.seq_len, device=x_seq.device)
-            position_encoding = self.position_embed_table(position)
+        data = self.blocks(data)
+        # logits -> reshape back to (B, T, N, C)
+        logits = self.lm(data)  # (B*N, T, C)
+        logits = (
+            logits.view(B, N, T, self.c).permute(0, 2, 1, 3).contiguous()
+        )  # (B, T, N, C)
+        logits = self.lm(data)  # (T, N, output_classes)
 
-            # print(data.shape, position_encoding.shape) -> (T, N, H) (T, H)
-            position_encoding = position_encoding.unsqueeze(1).to(data.device)
-            data = data + position_encoding
+        temperature = 0.5
+        logits /= temperature
 
-            # treat each N as a separate batch and make time the sequence dim: (N, T, H)data = self.blocks(data)  # (T, N, H)
-            data = data.permute(1, 0, 2).contiguous()  # (N, T, H)
-            data = self.blocks(data)
-            logits = self.lm(data)  # (T, N, output_classes)
-            logits = logits.permute(1, 0, 2).contiguous()
+        ### LOSS CALCULATIONS
+        loss = None
+        if y_data is not None:
+            y = y_data.squeeze(-1)  # (B, T, N)
+            out_flat = logits.view(B * T * N, self.c)
+            y_flat = y.view(B * T * N).long()
+            loss = self.loss_func(out_flat, y_flat)  # already mean over all elements
 
-            temperature = 0.5
-            logits /= temperature
-
-            ### LOSS CALCULATIONS
-            loss = None
-            if y_seq is not None:
-                # print(out.shape, y_seq.shape)
-                out_flat = logits.view(T * N, self.c)
-                y_flat = y_seq.view(T * N).long()
-                # print(out_flat.shape, y_flat.shape)
-                loss = self.loss_func(out_flat, y_flat)
-
-            return self.smax(logits), loss  # (T, N, 2), loss
-
-        results = []
-        total_loss = 0
-        for b in range(B):
-            x_seq = x_data[b]
-            y_seq = None
-            if y_data is not None:
-                y_seq = y_data[b]
-
-            res_b, loss_b = _process_sequence(x_seq, y_seq)
-            if y_data is not None:
-                total_loss += loss_b
-
-            results.append(res_b)
-
-        if y_data is None:
-            total_loss = None
-
-        return torch.stack(results, dim=0), total_loss / B
+        probs = self.smax(logits)  # (B, T, N, C)
+        return probs, loss
