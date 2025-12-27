@@ -155,7 +155,7 @@ def train_loop(
             torch.save(checkpoint, checkpoint_dir / "best_model.pt")
 
             if verbose:
-                print(f"New best model saved at epoch {epoch + 1}")
+                print(f"New best model saved at epoch {epoch}")
         else:
             patience_counter += 1
 
@@ -167,10 +167,8 @@ def train_loop(
         # early stopping
         if patience_counter >= patience:
             if verbose:
-                print(f"Early stopping triggered after {epoch + 1} epochs")
-                print(
-                    f"Best validation loss: {best_val_loss} at epoch {best_epoch + 1}"
-                )
+                print(f"Early stopping triggered after {epoch} epochs")
+                print(f"Best validation loss: {best_val_loss} at epoch {best_epoch}")
             break
 
         """ # DEBUG: Check if the heart is beating
@@ -186,7 +184,7 @@ def train_loop(
 
     if verbose:
         print("-" * 80)
-        print(f"Training completed. Best epoch: {best_epoch + 1}")
+        print(f"Training completed. Best epoch: {best_epoch}")
         print("Best validation metrics:")
         for k, v in best_checkpoint["val_metrics"].items():
             print(f"    {k}: {v}")
