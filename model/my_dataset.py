@@ -17,7 +17,7 @@ class MyDataset(Dataset):
         :param sequence_length: Description
         """
         super().__init__()
-        self.x = x_data  # (T, N, F)
+        self.x = x_data  # (T, N, F) == (T, N, token)
         self.y = y_data  # (T, N, output_classes)
         self.seq_len = sequence_length
 

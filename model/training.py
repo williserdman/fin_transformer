@@ -131,7 +131,7 @@ def train_loop(
 
         val_metrics = validate_epoch(model, val_loader, device)
 
-        scheduler.step(train_metrics["loss"])
+        scheduler.step(val_metrics["loss"])
         current_lr = optimizer.param_groups[0]["lr"]
 
         history["train_loss"].append(train_metrics["loss"])
@@ -161,7 +161,7 @@ def train_loop(
 
         # logging
         print(
-            f"Epoch: {epoch} | Train loss: {train_metrics["loss"]} | Val loss: {val_metrics["loss"]}"
+            f"Epoch: {epoch} | Train loss: {train_metrics["loss"]} | Val loss: {val_metrics["loss"]} | LR: {current_lr}"
         )
 
         # early stopping

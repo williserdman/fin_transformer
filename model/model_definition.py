@@ -58,8 +58,9 @@ class SimpleTransformer(nn.Module):
         self.h = hidden_dim
         ### LATENT REPRESENTATION OF TOKENS/POSITIONS ###
         self.c_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
+        self.t_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
+        self.v_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
         self.e_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
-        self.rv_embed_table = nn.Embedding(embed_table_sizes, hidden_dim)
 
         self.position_embed_table = nn.Embedding(sequence_len, hidden_dim)
         self.symbol_embed_table = nn.Embedding(
@@ -69,8 +70,20 @@ class SimpleTransformer(nn.Module):
 
         ### ATTENTION BLOCKS ###
         self.blocks = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
             *[
                 Block(hidden_dim, heads, sequence_len, dropout=dropout)
+                for _ in range(attention_layers)
+            ],
+            nn.LayerNorm(hidden_dim),
+        )
+
+        self.inner_dropout = nn.Dropout(dropout)
+
+        self.universe_attention_blocks = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            *[
+                Block(hidden_dim, heads, symbol_count, dropout=dropout)
                 for _ in range(attention_layers)
             ],
             nn.LayerNorm(hidden_dim),
@@ -105,8 +118,9 @@ class SimpleTransformer(nn.Module):
 
         # print(x_flat[:, :, 0].shape) # (N, T)
         c_embed = self.c_embed_table(x_flat[:, :, 0]).view(B, N, T, H)  # (B, N, T, H)
-        e_embed = self.c_embed_table(x_flat[:, :, 1]).view(B, N, T, H)  # (B, N, T, H)
-        rv_embed = self.c_embed_table(x_flat[:, :, 2]).view(B, N, T, H)  # (B, N, T, H)
+        t_embed = self.t_embed_table(x_flat[:, :, 1]).view(B, N, T, H)  # (B, N, T, H)
+        v_embed = self.v_embed_table(x_flat[:, :, 2]).view(B, N, T, H)  # (B, N, T, H)
+        e_embed = self.e_embed_table(x_flat[:, :, 3]).view(B, N, T, H)  # (B, N, T, H)
         position = torch.arange(0, self.seq_len, device=x_data.device)  # (T)
         position_encoding = (
             self.position_embed_table(position).unsqueeze(0).unsqueeze(0)
@@ -114,26 +128,38 @@ class SimpleTransformer(nn.Module):
 
         # sum token + position + symbol embeddings -> (B, N, T, H)
         # print(position_encoding.shape, symbol_encoding.shape, c_embed.shape) # torch.Size([1, 1, T, H]) torch.Size([N, 1, H]) torch.Size([B, N, T, H])
-        data = position_encoding + symbol_encoding + c_embed + e_embed + rv_embed
+        # print(c_embed.shape, e_embed.shape)
+        data = (
+            position_encoding + symbol_encoding + c_embed + t_embed + v_embed + e_embed
+        )
 
         data = data.view(B * N, T, H)
 
         data = self.blocks(data)
-        # logits -> reshape back to (B, T, N, C)
-        logits = self.lm(data)  # (B*N, T, C)
+
+        data = data[:, -1, :]  # (B*N, 1, H)
+        data = self.inner_dropout(data.view(B, N, H))
+
+        data = self.universe_attention_blocks(data)
+
+        logits = self.lm(data)  # (B*N, 1, C) # only care about last timestep
+        if y_data is not None:  # (B, T, N)
+            y_data = y_data[:, -1, :]
+
+        T = 1
         logits = (
             logits.view(B, N, T, self.c).permute(0, 2, 1, 3).contiguous()
-        )  # (B, T, N, C)
+        )  # (B, T(1), N, C)
 
-        temperature = 0.5
-        logits = logits / temperature
+        # temperature = 0.5
+        # logits = logits / temperature
 
         ### LOSS CALCULATIONS
         loss = None
         if y_data is not None:
             y = y_data.squeeze(-1)  # (B, T, N)
             out_flat = logits.view(B * T * N, self.c)
-            y_flat = y.view(B * T * N).long()
+            y_flat = y.reshape(B * T * N).long()
             loss = self.loss_func(out_flat, y_flat)  # already mean over all elements
 
         probs = self.smax(logits)  # (B, T, N, C)
