@@ -6,7 +6,7 @@ from torch.nn import MultiheadAttention
 class Block(nn.Module):
     """tranformer block: communication followed by computation"""
 
-    def __init__(self, n_embd, n_head, sequence_length, dropout=0):
+    def __init__(self, n_embd, n_head, sequence_length, is_causal, dropout=0):
         super().__init__()
         self.sa = MultiheadAttention(n_embd, n_head, dropout, batch_first=True)
         self.ffwd = nn.Sequential(
@@ -21,6 +21,8 @@ class Block(nn.Module):
 
         self.seq_len = sequence_length
 
+        self.is_causal = is_causal
+
     def forward(self, x):
         x = self.ln1(x)
         n, _ = self.sa(
@@ -28,12 +30,16 @@ class Block(nn.Module):
             x,
             x,
             need_weights=False,
-            is_causal=True,
-            attn_mask=torch.triu(
-                torch.ones(
-                    (self.seq_len, self.seq_len), device=x.device, dtype=torch.bool
-                ),
-                1,
+            is_causal=self.is_causal,
+            attn_mask=(
+                torch.triu(
+                    torch.ones(
+                        (self.seq_len, self.seq_len), device=x.device, dtype=torch.bool
+                    ),
+                    1,
+                )
+                if self.is_causal
+                else None
             ),
         )  # (B,T,n_embd)
         x = x + n
@@ -72,7 +78,7 @@ class SimpleTransformer(nn.Module):
         self.blocks = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             *[
-                Block(hidden_dim, heads, sequence_len, dropout=dropout)
+                Block(hidden_dim, heads, sequence_len, is_causal=True, dropout=dropout)
                 for _ in range(attention_layers)
             ],
             nn.LayerNorm(hidden_dim),
@@ -83,7 +89,7 @@ class SimpleTransformer(nn.Module):
         self.universe_attention_blocks = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             *[
-                Block(hidden_dim, heads, symbol_count, dropout=dropout)
+                Block(hidden_dim, heads, symbol_count, is_causal=False, dropout=dropout)
                 for _ in range(attention_layers)
             ],
             nn.LayerNorm(hidden_dim),
