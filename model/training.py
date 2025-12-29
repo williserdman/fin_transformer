@@ -6,6 +6,7 @@ import pandas as pd
 from torch.utils.data import DataLoader, Dataset
 from pathlib import Path
 from typing import Iterable
+import tqdm
 
 
 def _epoch_metrics(preds, targets):
@@ -25,7 +26,7 @@ def train_epoch(
     all_targets = []
 
     # lets us iterate through batches
-    for x_batch, y_batch in dataloader:
+    for x_batch, y_batch in tqdm.tqdm(dataloader, desc="epoch progress (train)"):
         x_batch = x_batch.to(device)
         y_batch = y_batch.to(device)
 
@@ -40,8 +41,8 @@ def train_epoch(
         optimizer.step()
 
         total_loss += loss.item()
-        all_preds.append(preds)
-        all_targets.append(y_batch)
+        all_preds.append(preds.detach().cpu())
+        all_targets.append(y_batch.detach().cpu())
 
     # compute epoch metrics
     all_preds = torch.cat(all_preds, dim=0)  # (T*B, N, 2)
@@ -59,15 +60,15 @@ def validate_epoch(model: nn.Module, dataloader: DataLoader, device: torch.devic
     all_targets = []
 
     with torch.no_grad():
-        for x_batch, y_batch in dataloader:
+        for x_batch, y_batch in tqdm.tqdm(dataloader, desc="epoch progress (val)"):
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
 
             preds, loss = model(x_batch, y_batch)
 
             total_loss += loss.item()
-            all_preds.append(preds)
-            all_targets.append(y_batch)
+            all_preds.append(preds.detach().cpu())
+            all_targets.append(y_batch.detach().cpu())
 
     all_preds = torch.cat(all_preds, dim=0)
     all_targets = torch.cat(all_targets, dim=0)
