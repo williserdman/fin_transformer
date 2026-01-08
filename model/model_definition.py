@@ -11,7 +11,7 @@ class Block(nn.Module):
         self.sa = MultiheadAttention(n_embd, n_head, dropout, batch_first=True)
         self.ffwd = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),  # expand to 4x
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(4 * n_embd, n_embd),  # back into residual pathway
             nn.Dropout(dropout),
         )

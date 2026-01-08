@@ -54,6 +54,7 @@ def train_epoch(
 
 
 def validate_epoch(model: nn.Module, dataloader: DataLoader, device: torch.device):
+    torch.backends.mha.set_fastpath_enabled(False)
     model.eval()
     total_loss = 0
     all_preds = []

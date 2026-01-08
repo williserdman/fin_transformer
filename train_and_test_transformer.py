@@ -227,7 +227,7 @@ massive_df = pd.read_parquet("data/small_group").rename(columns={"symbol": "tick
 massive_df["token"] = get_causal_tokens(massive_df)
 massive_df = get_target(massive_df)
 massive_df = massive_df.dropna()
-df = massive_df
+# df = massive_df
 
 # %%
 # align all tickers to a common timestamp index and rebuild a compact (T_common, N, 1) integer array
@@ -336,8 +336,8 @@ class_freqs = np.unique(all_targets, return_counts=True)[1]
 class_freqs, number_of_classes
 
 # %%
-SEQ_LEN = 8
-BATCH_SIZE = 1  # the batches chosen should be set up so that the components of each batch are sequential, then shuffle the order of batches/batches, custom dataloader
+SEQ_LEN = 256
+BATCH_SIZE = 32  # the batches chosen should be set up so that the components of each batch are sequential, then shuffle the order of batches/batches, custom dataloader
 
 train_dataset = MyDataset(
     all_sequences[: int(T * 0.8)], all_targets[: int(T * 0.8)], SEQ_LEN
@@ -374,7 +374,7 @@ res = train_loop(
     model,
     train_dataloader,
     val_dataloader,
-    5,
+    20,
     4e-4,
     1e-5,
     torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
@@ -390,8 +390,8 @@ plt.plot(res["history"]["val_loss"])
 
 
 # %%
-SEQ_LEN = 8
-BATCH_SIZE = 128
+""" SEQ_LEN = 256
+BATCH_SIZE = 32 """
 
 m2 = SimpleTransformer(
     feature_bins,
@@ -525,7 +525,7 @@ portfolio = vbt.Portfolio.from_signals(
     short_entries=short_signal,
     short_exits=long_signal,
     fees=0.0002,
-    freq="1h",
+    freq="1d",
 )
 
 st = portfolio.stats()
